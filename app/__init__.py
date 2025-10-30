@@ -15,9 +15,8 @@ def create_app():
     init_db()  # Initialize the database only if it doesn't exist
 
     log = logging.getLogger("werkzeug")
-    log.setLevel(logging.ERROR)
-    app.logger.disabled = True
-    log.disabled = True
+    log.setLevel(logging.WARNING)
+    app.logger.setLevel(logging.INFO)
 
     from .routes import api  # Import the Blueprint
     app.register_blueprint(api)  # Register the Blueprint with the app instance

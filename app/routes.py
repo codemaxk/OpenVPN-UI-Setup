@@ -39,18 +39,26 @@ def listUsers():
 @api.route("/create/<path:name>")
 def createUser(name):
     if isAdmin(request.args):
-        vpn.createUser(name)
-        return {"success": True}
+        try:
+            vpn.createUser(name)
+            return {"success": True}
+        except Exception as exc:
+            api.logger.exception("Failed to create VPN user %s", name)
+            return {"success": False, "error": str(exc)}, 500
     else:
-        return {"success": False}
+        return {"success": False, "error": "Unauthorized"}, 403
 
 @api.route("/remove/<path:name>")
 def removeUser(name):
     if isAdmin(request.args):
-        vpn.removeUser(name)
-        return {"success": True}
+        try:
+            vpn.removeUser(name)
+            return {"success": True}
+        except Exception as exc:
+            api.logger.exception("Failed to remove VPN user %s", name)
+            return {"success": False, "error": str(exc)}, 500
     else:
-        return {"success": False}
+        return {"success": False, "error": "Unauthorized"}, 403
 
 @api.route("/changeAdmin", methods=["POST"])
 def changeAdmin():

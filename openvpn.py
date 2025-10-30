@@ -94,7 +94,7 @@ def createUser(user: str) -> None:
     paths = _get_paths()
 
     _run_command(
-        ["sudo", "./easyrsa", "--batch", "--days=3650", "build-client-full", user, "nopass"],
+        ["./easyrsa", "--batch", "--days=3650", "build-client-full", user, "nopass"],
         cwd=paths.easy_rsa,
     )
 
@@ -164,14 +164,14 @@ def removeUser(user: str) -> None:
         return
     paths = _get_paths()
 
-    _run_command(["sudo", "./easyrsa", "--batch", "revoke", user], cwd=paths.easy_rsa)
+    _run_command(["./easyrsa", "--batch", "revoke", user], cwd=paths.easy_rsa)
     _run_command(
-        ["sudo", "./easyrsa", "--batch", "--days=3650", "gen-crl"], cwd=paths.easy_rsa
+        ["./easyrsa", "--batch", "--days=3650", "gen-crl"], cwd=paths.easy_rsa
     )
 
     crl_source = paths.pki / "crl.pem"
-    _run_command(["sudo", "cp", str(crl_source), str(paths.crl_destination)])
-    _run_command(["sudo", "chown", "nobody:nogroup", str(paths.crl_destination)])
+    _run_command(["cp", str(crl_source), str(paths.crl_destination)])
+    _run_command(["chown", "nobody:nogroup", str(paths.crl_destination)])
 
 
 def parse_log() -> None:
