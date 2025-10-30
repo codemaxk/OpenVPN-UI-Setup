@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Optional
 import subprocess
 
 vpnName = "OpenVPN"
@@ -9,9 +10,9 @@ class OpenVPNPaths:
     def __init__(
         self,
         easy_rsa: Path,
-        client_template: Path | None,
-        tls_crypt: Path | None,
-        tls_auth: Path | None,
+        client_template: Optional[Path],
+        tls_crypt: Optional[Path],
+        tls_auth: Optional[Path],
         crl_destination: Path,
     ) -> None:
         self.easy_rsa = easy_rsa
@@ -68,7 +69,14 @@ def _detect_paths() -> OpenVPNPaths:
     )
 
 
-PATHS = _detect_paths()
+_PATHS: Optional[OpenVPNPaths] = None
+
+
+def _get_paths() -> OpenVPNPaths:
+    global _PATHS
+    if _PATHS is None:
+        _PATHS = _detect_paths()
+    return _PATHS
 
 
 def _run_command(command: list[str], cwd: Path | None = None) -> None:
@@ -83,24 +91,28 @@ def createUser(user: str) -> None:
     if user in listUsers():
         return
 
+    paths = _get_paths()
+
     _run_command(
         ["sudo", "./easyrsa", "--batch", "--days=3650", "build-client-full", user, "nopass"],
-        cwd=PATHS.easy_rsa,
+        cwd=paths.easy_rsa,
     )
 
 
 def getConfig(user: str) -> str:
-    if PATHS.client_template and PATHS.client_template.exists():
-        config_parts = [PATHS.client_template.read_text(encoding="utf-8")]
+    paths = _get_paths()
+
+    if paths.client_template and paths.client_template.exists():
+        config_parts = [paths.client_template.read_text(encoding="utf-8")]
     else:
         raise FileNotFoundError(
             "OpenVPN client template not found. Expected client-template.txt or client-common.txt."
         )
 
-    ca_path = PATHS.pki / "ca.crt"
-    cert_path = PATHS.pki / "issued" / f"{user}.crt"
-    key_path = PATHS.pki / "private" / f"{user}.key"
-    tls_key_path = PATHS.tls_crypt or PATHS.tls_auth
+    ca_path = paths.pki / "ca.crt"
+    cert_path = paths.pki / "issued" / f"{user}.crt"
+    key_path = paths.pki / "private" / f"{user}.key"
+    tls_key_path = paths.tls_crypt or paths.tls_auth
 
     if not cert_path.exists() or not key_path.exists():
         raise FileNotFoundError(
@@ -126,7 +138,12 @@ def getConfig(user: str) -> str:
 
 
 def listUsers() -> list[str]:
-    index_file = PATHS.pki / "index.txt"
+    try:
+        paths = _get_paths()
+    except RuntimeError:
+        return []
+
+    index_file = paths.pki / "index.txt"
     if not index_file.exists():
         return []
 
@@ -145,15 +162,16 @@ def listUsers() -> list[str]:
 def removeUser(user: str) -> None:
     if user not in listUsers():
         return
+    paths = _get_paths()
 
-    _run_command(["sudo", "./easyrsa", "--batch", "revoke", user], cwd=PATHS.easy_rsa)
+    _run_command(["sudo", "./easyrsa", "--batch", "revoke", user], cwd=paths.easy_rsa)
     _run_command(
-        ["sudo", "./easyrsa", "--batch", "--days=3650", "gen-crl"], cwd=PATHS.easy_rsa
+        ["sudo", "./easyrsa", "--batch", "--days=3650", "gen-crl"], cwd=paths.easy_rsa
     )
 
-    crl_source = PATHS.pki / "crl.pem"
-    _run_command(["sudo", "cp", str(crl_source), str(PATHS.crl_destination)])
-    _run_command(["sudo", "chown", "nobody:nogroup", str(PATHS.crl_destination)])
+    crl_source = paths.pki / "crl.pem"
+    _run_command(["sudo", "cp", str(crl_source), str(paths.crl_destination)])
+    _run_command(["sudo", "chown", "nobody:nogroup", str(paths.crl_destination)])
 
 
 def parse_log() -> None:
