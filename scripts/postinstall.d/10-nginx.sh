@@ -18,13 +18,29 @@ fi
 
 SERVER_NAME="${DOMAIN:-${SERVER_NAME:-_}}"
 APP_PORT="${APP_PORT:-55151}"
+SSL_DIR="${SSL_DIR:-/etc/nginx/ssl}"
+SSL_CERT_PATH="${SSL_CERT_PATH:-${SSL_DIR}/vpn-admin.crt}"
+SSL_KEY_PATH="${SSL_KEY_PATH:-${SSL_DIR}/vpn-admin.key}"
 
-export SERVER_NAME APP_PORT
+export SERVER_NAME APP_PORT SSL_CERT_PATH SSL_KEY_PATH
 
-mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
+mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled "$SSL_DIR"
+
+if [[ ! -f "$SSL_CERT_PATH" || ! -f "$SSL_KEY_PATH" ]]; then
+    if command -v openssl >/dev/null 2>&1; then
+        printf '[10-nginx] Generating self-signed certificate for %s.\n' "$SERVER_NAME"
+        openssl req -x509 -nodes -newkey rsa:2048 \
+            -subj "/CN=${SERVER_NAME:-localhost}" \
+            -keyout "$SSL_KEY_PATH" \
+            -out "$SSL_CERT_PATH" \
+            -days "${SSL_DAYS:-3650}"
+    else
+        printf '[10-nginx] openssl not available; skipping certificate generation.\n'
+    fi
+fi
 
 printf '[10-nginx] Rendering nginx vhost for %s (port %s).\n' "$SERVER_NAME" "$APP_PORT"
-envsubst '${SERVER_NAME} ${APP_PORT}' <"$TEMPLATE_PATH" >"$SITE_AVAILABLE"
+envsubst '${SERVER_NAME} ${APP_PORT} ${SSL_CERT_PATH} ${SSL_KEY_PATH}' <"$TEMPLATE_PATH" >"$SITE_AVAILABLE"
 
 ln -sf "$SITE_AVAILABLE" "$SITE_ENABLED"
 

@@ -67,6 +67,7 @@ install_base_packages() {
         nginx
         ufw
         gettext-base
+        openssl
     )
 
     log "Installing required packages: ${packages[*]}"
