@@ -142,7 +142,7 @@ generate_admin_config() {
     local app_dir="${1}"
     local vpn_type="${2}"
     local admin_user="${3}"
-    local admin_pass="${4}"
+    local admin_pass_hash="${4}"
 
     local module_path="${app_dir}/${vpn_type}.py"
     if [[ ! -f "$module_path" ]]; then
@@ -158,27 +158,59 @@ generate_admin_config() {
     fi
 
     log "Creating admin configuration at ${config_path}"
-    ADMIN_USER="$admin_user" ADMIN_PASS="$admin_pass" VPN_TYPE="$vpn_type" CONFIG_PATH="$config_path" \
+    ADMIN_USER="$admin_user" ADMIN_PASS_HASH="$admin_pass_hash" VPN_TYPE="$vpn_type" CONFIG_PATH="$config_path" \
         python3 - <<'PY'
-import hashlib
 import os
 from pathlib import Path
 
 admin_user = os.environ["ADMIN_USER"]
-admin_pass = os.environ["ADMIN_PASS"]
+admin_pass_hash = os.environ["ADMIN_PASS_HASH"]
 vpn_type = os.environ["VPN_TYPE"]
 config_path = Path(os.environ["CONFIG_PATH"])
-
-hashed_password = hashlib.sha256(admin_pass.encode("utf-8")).hexdigest()
 
 config_path.write_text(
     f"import {vpn_type} as vpn\n"
     "creds = {\n"
     f'    "username": "{admin_user}",\n'
-    f'    "password": "{hashed_password}",\n'
+    f'    "password": "{admin_pass_hash}",\n'
     "}\n",
     encoding="utf-8",
 )
+PY
+}
+
+sync_admin_credentials() {
+    local app_dir="${1}"
+    local admin_user="${2}"
+    local admin_pass_hash="${3}"
+
+    local python_bin="${app_dir}/.venv/bin/python"
+    if [[ ! -x "$python_bin" ]]; then
+        warn "Virtualenv Python binary not found at ${python_bin}; skipping DB sync."
+        return
+    fi
+
+    log "Synchronising admin credentials with database"
+    PYTHONPATH="$app_dir" ADMIN_USER="$admin_user" ADMIN_PASS_HASH="$admin_pass_hash" "$python_bin" - <<'PY'
+import os
+
+from app.models import Session, AdminCredentials, init_db
+
+admin_user = os.environ["ADMIN_USER"]
+admin_pass_hash = os.environ["ADMIN_PASS_HASH"]
+
+init_db()
+
+session = Session()
+admin = session.query(AdminCredentials).first()
+if admin:
+    admin.username = admin_user
+    admin.password = admin_pass_hash
+else:
+    admin = AdminCredentials(username=admin_user, password=admin_pass_hash)
+    session.add(admin)
+session.commit()
+session.close()
 PY
 }
 
@@ -232,12 +264,18 @@ install_openvpn() {
     export DNS="${DNS:-1}"
     export COMPRESSION_ENABLED="${COMPRESSION_ENABLED:-n}"
     export CUSTOMIZE_ENC="${CUSTOMIZE_ENC:-n}"
+    export CLIENT="${OPENVPN_BOOTSTRAP_CLIENT:-bootstrap-client}"
+    export PASS="${PASS:-1}"
 
     log "Running OpenVPN installer in unattended mode"
     bash "${tmp_dir}/openvpn-install.sh"
 
     trap - RETURN
     rm -rf "$tmp_dir"
+
+    if [[ "${REMOVE_BOOTSTRAP_CLIENT:-1}" == "1" ]]; then
+        remove_bootstrap_client "${OPENVPN_BOOTSTRAP_CLIENT:-bootstrap-client}"
+    fi
 }
 
 configure_ufw() {
@@ -288,6 +326,41 @@ run_postinstall_hooks() {
     fi
 }
 
+remove_bootstrap_client() {
+    local client_name="${1}"
+    if [[ -z "$client_name" ]]; then
+        return
+    fi
+
+    local easyrsa_dir="/etc/openvpn/easy-rsa"
+    local index_file="${easyrsa_dir}/pki/index.txt"
+
+    if [[ ! -f "$index_file" ]]; then
+        rm -f "/root/${client_name}.ovpn"
+        return
+    fi
+
+    if ! grep -q "/CN=${client_name}$" "$index_file"; then
+        rm -f "/root/${client_name}.ovpn"
+        return
+    fi
+
+    log "Removing bootstrap OpenVPN client ${client_name}"
+    if [[ -x "${easyrsa_dir}/easyrsa" ]]; then
+        (
+            cd "$easyrsa_dir" || exit 0
+            ./easyrsa --batch revoke "$client_name" >/dev/null 2>&1 || true
+            EASYRSA_CRL_DAYS=3650 ./easyrsa gen-crl >/dev/null 2>&1 || true
+        )
+        cp "${easyrsa_dir}/pki/crl.pem" /etc/openvpn/crl.pem 2>/dev/null || true
+        chmod 644 /etc/openvpn/crl.pem 2>/dev/null || true
+    fi
+
+    sed -i "/^${client_name},.*/d" /etc/openvpn/ipp.txt 2>/dev/null || true
+    rm -f "/root/${client_name}.ovpn"
+    systemctl restart openvpn@server >/dev/null 2>&1 || systemctl restart openvpn >/dev/null 2>&1 || true
+}
+
 main() {
     require_root
     ensure_supported_os
@@ -311,6 +384,8 @@ main() {
     ADMIN_USER="${ADMIN_USER:-admin}"
     ADMIN_PASS="${ADMIN_PASS:-}"
     GENERATED_PASSWORD=0
+    OPENVPN_BOOTSTRAP_CLIENT="${OPENVPN_BOOTSTRAP_CLIENT:-bootstrap-client}"
+    REMOVE_BOOTSTRAP_CLIENT="${REMOVE_BOOTSTRAP_CLIENT:-1}"
 
     if [[ -z "$ADMIN_PASS" ]]; then
         log "ADMIN_PASS not provided; generating a random password."
@@ -328,7 +403,15 @@ PY
     prepare_source_tree "$local_repo" "$USE_LOCAL_SOURCE" "$REPO_URL" "$BRANCH" "$APP_DIR"
 
     ensure_python_dependencies "$APP_DIR"
-    generate_admin_config "$APP_DIR" "$VPN_TYPE" "$ADMIN_USER" "$ADMIN_PASS"
+    ADMIN_PASS_HASH="$(ADMIN_PASS="$ADMIN_PASS" python3 - <<'PY'
+import hashlib
+import os
+print(hashlib.sha256(os.environ["ADMIN_PASS"].encode("utf-8")).hexdigest())
+PY
+)"
+
+    generate_admin_config "$APP_DIR" "$VPN_TYPE" "$ADMIN_USER" "$ADMIN_PASS_HASH"
+    sync_admin_credentials "$APP_DIR" "$ADMIN_USER" "$ADMIN_PASS_HASH"
 
     install_openvpn
     configure_ufw
@@ -337,11 +420,9 @@ PY
     log "Bootstrap complete."
     printf '\n%-20s %s\n' "Application path:" "$APP_DIR"
     printf '%-20s %s\n' "Admin user:" "$ADMIN_USER"
+    printf '%-20s %s\n' "Admin password:" "$ADMIN_PASS"
     if [[ "$GENERATED_PASSWORD" -eq 1 ]]; then
-        printf '%-20s %s\n' "Admin password:" "$ADMIN_PASS"
         printf '%-20s %s\n' "Note:" "Store this password securely."
-    else
-        printf '%-20s %s\n' "Admin password:" "(provided via ENV)"
     fi
     printf '%-20s %s\n' "VPN type:" "$VPN_TYPE"
     printf '%-20s %s\n' "Repository URL:" "$REPO_URL"
