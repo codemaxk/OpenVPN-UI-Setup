@@ -1,4 +1,4 @@
-from flask import Blueprint, request, render_template, Response, jsonify
+from flask import Blueprint, request, render_template, Response, jsonify, current_app
 import psutil
 from .config import creds, vpn
 from .utils import isAdmin
@@ -41,9 +41,10 @@ def createUser(name):
     if isAdmin(request.args):
         try:
             vpn.createUser(name)
+            current_app.logger.info("Created VPN user %s", name)
             return {"success": True}
         except Exception as exc:
-            api.logger.exception("Failed to create VPN user %s", name)
+            current_app.logger.exception("Failed to create VPN user %s", name)
             return {"success": False, "error": str(exc)}, 500
     else:
         return {"success": False, "error": "Unauthorized"}, 403
@@ -53,9 +54,10 @@ def removeUser(name):
     if isAdmin(request.args):
         try:
             vpn.removeUser(name)
+            current_app.logger.info("Removed VPN user %s", name)
             return {"success": True}
         except Exception as exc:
-            api.logger.exception("Failed to remove VPN user %s", name)
+            current_app.logger.exception("Failed to remove VPN user %s", name)
             return {"success": False, "error": str(exc)}, 500
     else:
         return {"success": False, "error": "Unauthorized"}, 403

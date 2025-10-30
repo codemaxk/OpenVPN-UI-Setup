@@ -8,7 +8,7 @@ Type=simple
 User=${SERVICE_USER}
 Group=${SERVICE_GROUP}
 WorkingDirectory=${APP_DIR}
-Environment="PATH=${APP_DIR}/.venv/bin"
+Environment="PATH=${APP_DIR}/.venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 ExecStart=${APP_DIR}/.venv/bin/gunicorn --bind ${BIND_ADDRESS}:${APP_PORT} run:app
 Restart=on-failure
 RestartSec=5

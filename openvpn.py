@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Optional
 import subprocess
+import os
 
 vpnName = "OpenVPN"
 vpnExtension = "ovpn"
@@ -80,7 +81,12 @@ def _get_paths() -> OpenVPNPaths:
 
 
 def _run_command(command: list[str], cwd: Path | None = None) -> None:
-    subprocess.run(command, check=True, cwd=cwd)
+    env = os.environ.copy()
+    env.setdefault(
+        "PATH",
+        "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    )
+    subprocess.run(command, check=True, cwd=cwd, env=env)
 
 
 def _read_file(path: Path) -> str:
