@@ -191,7 +191,9 @@ sync_admin_credentials() {
     fi
 
     log "Synchronising admin credentials with database"
-    PYTHONPATH="$app_dir" ADMIN_USER="$admin_user" ADMIN_PASS_HASH="$admin_pass_hash" "$python_bin" - <<'PY'
+    (
+        cd "$app_dir"
+        PYTHONPATH="$app_dir" ADMIN_USER="$admin_user" ADMIN_PASS_HASH="$admin_pass_hash" "$python_bin" - <<'PY'
 import os
 
 from app.models import Session, AdminCredentials, init_db
@@ -212,6 +214,7 @@ else:
 session.commit()
 session.close()
 PY
+    )
 }
 
 detect_public_ip() {
@@ -425,7 +428,6 @@ PY
         printf '%-20s %s\n' "Note:" "Store this password securely."
     fi
     printf '%-20s %s\n' "VPN type:" "$VPN_TYPE"
-    printf '%-20s %s\n' "Repository URL:" "$REPO_URL"
 }
 
 main "$@"
