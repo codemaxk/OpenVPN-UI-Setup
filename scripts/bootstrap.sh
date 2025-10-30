@@ -384,7 +384,7 @@ main() {
     SRC_DIR="${SRC_DIR:-}"
     USE_LOCAL_SOURCE="${USE_LOCAL_SOURCE:-0}"
     VPN_TYPE="${VPN_TYPE:-openvpn}"
-    ADMIN_USER="${ADMIN_USER:-admin}"
+    ADMIN_USER="Administrator"
     ADMIN_PASS="${ADMIN_PASS:-}"
     GENERATED_PASSWORD=0
     OPENVPN_BOOTSTRAP_CLIENT="${OPENVPN_BOOTSTRAP_CLIENT:-bootstrap-client}"
