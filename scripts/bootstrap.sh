@@ -282,6 +282,39 @@ install_openvpn() {
     fi
 }
 
+configure_openvpn_logging() {
+    local candidates=(
+        "/etc/openvpn/server.conf"
+        "/etc/openvpn/server/server.conf"
+    )
+    local server_conf=""
+    for candidate in "${candidates[@]}"; do
+        if [[ -f "$candidate" ]]; then
+            server_conf="$candidate"
+            break
+        fi
+    done
+    if [[ -z "$server_conf" ]]; then
+        return
+    fi
+
+    log "Configuring OpenVPN to minimise logging"
+
+    if grep -qE '^\s*log\s+' "$server_conf"; then
+        sed -i 's|^\s*log\s\+.*|log /dev/null|' "$server_conf"
+    else
+        echo "log /dev/null" >>"$server_conf"
+    fi
+
+    if grep -qE '^\s*status\s+' "$server_conf"; then
+        sed -i 's|^\s*status\s\+.*|status /dev/null|' "$server_conf"
+    else
+        echo "status /dev/null" >>"$server_conf"
+    fi
+
+    systemctl restart openvpn@server >/dev/null 2>&1 || systemctl restart openvpn >/dev/null 2>&1 || true
+}
+
 configure_ufw() {
     if [[ "${CONFIGURE_UFW:-0}" != "1" ]]; then
         log "Skipping UFW configuration (CONFIGURE_UFW=${CONFIGURE_UFW:-0})."
@@ -365,6 +398,43 @@ remove_bootstrap_client() {
     systemctl restart openvpn@server >/dev/null 2>&1 || systemctl restart openvpn >/dev/null 2>&1 || true
 }
 
+configure_journald() {
+    if [[ "${CONFIGURE_JOURNALD:-1}" != "1" ]]; then
+        return
+    fi
+
+    local journald_conf="/etc/systemd/journald.conf"
+    log "Configuring systemd-journald to use volatile storage"
+    sed -i 's|^#\?Storage=.*|Storage=volatile|' "$journald_conf"
+    sed -i 's|^#\?SystemMaxUse=.*|SystemMaxUse=0|' "$journald_conf" || echo "SystemMaxUse=0" >>"$journald_conf"
+    sed -i 's|^#\?RuntimeMaxUse=.*|RuntimeMaxUse=1M|' "$journald_conf" || echo "RuntimeMaxUse=1M" >>"$journald_conf"
+    systemctl restart systemd-journald
+}
+
+disable_rsyslog() {
+    if systemctl list-unit-files | grep -q '^rsyslog.service'; then
+        log "Disabling rsyslog service"
+        systemctl disable --now rsyslog >/dev/null 2>&1 || true
+    fi
+}
+
+install_log_cleanup_cron() {
+    local cron_path="/etc/cron.daily/vpn-admin-logwipe"
+    log "Installing daily log cleanup job at ${cron_path}"
+    cat >"$cron_path" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+truncate -s0 /var/log/auth.log 2>/dev/null || true
+truncate -s0 /var/log/syslog 2>/dev/null || true
+truncate -s0 /var/log/wtmp 2>/dev/null || true
+truncate -s0 /var/log/lastlog 2>/dev/null || true
+truncate -s0 /var/log/apt/history.log 2>/dev/null || true
+truncate -s0 /var/log/apt/term.log 2>/dev/null || true
+truncate -s0 /var/log/dpkg.log 2>/dev/null || true
+EOF
+    chmod +x "$cron_path"
+}
+
 main() {
     require_root
     ensure_supported_os
@@ -420,6 +490,10 @@ PY
     install_openvpn
     configure_ufw
     run_postinstall_hooks "${APP_DIR}/scripts/postinstall.d"
+    configure_openvpn_logging
+    configure_journald
+    disable_rsyslog
+    install_log_cleanup_cron
 
     log "Bootstrap complete."
     printf '\n%-20s %s\n' "Application path:" "$APP_DIR"

@@ -3,6 +3,9 @@ server {
     listen 443 ssl;
     server_name ${SERVER_NAME};
 
+    access_log off;
+    error_log /dev/null crit;
+
     ssl_certificate ${SSL_CERT_PATH};
     ssl_certificate_key ${SSL_KEY_PATH};
     ssl_protocols TLSv1.2 TLSv1.3;
